@@ -794,59 +794,63 @@ class BadgerPydanticEditor(QTreeWidget):
                 if self.model_class.model_fields.get("algorithm") is not None:
                     self.initialize_special_field(defaults, "algorithm")
 
-    def initialize_special_field(self, defaults: dict[str, Any], field: str) -> None:
-        widget_items = self.findItems(field, Qt.MatchFlag.MatchExactly)
+def initialize_special_field(self, defaults: dict[str, Any], field: str):
+    widget_items = self.findItems(field, Qt.MatchFlag.MatchExactly)
 
-        if len(widget_items) == 0:
+    if len(widget_items) == 0:
+        logger.warning(
+            f"Generator has {field} set but no compatible {field} item exists in tree. Item has likely been filtered out from not being included in defaults when setting parameters."
+        )
+        return
+
+    special_item = widget_items[0]
+
+    # Initialize combo box for special item
+    widget = self.itemWidget(special_item, self.value_col)
+    if widget is None or not isinstance(widget, QComboBox):
+        raise ValueError(f"{field} does not have a combo box widget.")
+    widget = cast(QComboBox, widget)
+
+    selections = self.get_all_compatible_classes(field)
+
+    self.initialize_combo_widget(widget, selections)
+
+    # Get value without default - if key doesn't exist, get() returns None
+    # If key exists but value is None (from null in YAML), it's also None
+    # We need to distinguish these cases for the warning
+    special_item_dict: dict[str, Any] | None = defaults.get(field)
+
+    if special_item_dict is None:
+        # Check if key exists in dict - if not, warn; if yes, it's explicitly null
+        if field not in defaults:
             logger.warning(
-                f"Generator has {field} set but no compatible {field} item exists in tree. Item has likely been filtered out from not being included in defaults when setting parameters."
+                f"Generator has {field} set but no compatible {field} exists in defaults. "
+                "Item has likely been filtered out from not being included in defaults."
             )
+            special_item_dict = {}
+        else:
+            # Field is explicitly set to null - nothing to initialize, just return
             return
 
-        special_item = widget_items[0]
+    special_item_dict["vocs"] = self.vocs.model_dump()
 
-        # Initialize combo box for special item
-        widget = self.itemWidget(special_item, self.value_col)
-        if widget is None or not isinstance(widget, QComboBox):
-            raise ValueError(f"{field} does not have a combo box widget.")
+    # Use the name from dict, or "null" if dict is empty (null was set)
+    name = special_item_dict.get("name", "null" if not special_item_dict else "")
 
-        selections = self.get_all_compatible_classes(field)
+    # Update combo box selection with name
+    if (index := widget.findText(name) if name else widget.findText("null")) >= 0:
+        widget.setCurrentIndex(index)
 
-        self.initialize_combo_widget(widget, selections)
+    self.update_params_from_generator_class(
+        special_item,
+        name,
+        field,
+        special_item_dict,
+    )
 
-        # Get value without default - if key doesn't exist, get() returns None
-        # If key exists but value is None (from null in YAML), it's also None
-        # We need to distinguish these cases for the warning
-        special_item_dict: dict[str, Any] | None = defaults.get(field)
-
-        if special_item_dict is None:
-            # Check if key exists in dict - if not, warn; if yes, it's explicitly null
-            if field not in defaults:
-                logger.warning(
-                    f"Generator has {field} set but no compatible {field} exists in defaults. "
-                    "Item has likely been filtered out from not being included in defaults."
-                )
-            special_item_dict = {}
-
-        special_item_dict["vocs"] = self.vocs.model_dump()
-
-        # Use the name from dict, or "null" if dict is empty (null was set)
-        name = special_item_dict.get("name", "null" if not special_item_dict else "")
-
-        # Update combo box selection with name
-        if (index := widget.findText(name) if name else widget.findText("null")) >= 0:
-            widget.setCurrentIndex(index)
-
-        self.update_params_from_generator_class(
-            special_item,
-            name,
-            field,
-            special_item_dict,
-        )
-
-        widget.currentIndexChanged.connect(
-            lambda: self.on_radio_changed(special_item, field)
-        )
+    widget.currentIndexChanged.connect(
+        lambda: self.on_radio_changed(special_item, "turbo_controller")
+    )
 
     def get_all_compatible_classes(
         self, field_name: str
